@@ -24,7 +24,7 @@ services:
   migrate:
     build: .
     env_file: .env
-    command: ["alembic", "-c", "migrations/alembic.ini", "upgrade", "head"]
+    command: ["python", "scripts/migrate.py"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,4 +47,3 @@ services:
 
 volumes:
   postgres-data:
-
