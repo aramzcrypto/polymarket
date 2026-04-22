@@ -13,9 +13,9 @@ COPY pyproject.toml README.md ./
 COPY app ./app
 COPY migrations ./migrations
 COPY configs ./configs
+COPY scripts ./scripts
 
 RUN pip install --no-cache-dir -e ".[dev]"
 
 EXPOSE 8000
 CMD ["python", "-m", "app.main"]
-
