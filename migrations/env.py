@@ -15,10 +15,16 @@ target_metadata = None
 
 
 def get_url() -> str:
-    return os.getenv(
-        "DATABASE_URL",
-        config.get_main_option("sqlalchemy.url", ""),
-    ).replace("+asyncpg", "")
+    url = (
+        os.getenv("DATABASE__URL")
+        or os.getenv("DATABASE_URL")
+        or config.get_main_option("sqlalchemy.url", "")
+    )
+    if url.startswith("postgresql+asyncpg://"):
+        return url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return url
 
 
 def run_migrations_offline() -> None:
@@ -46,4 +52,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-
