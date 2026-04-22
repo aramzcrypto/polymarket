@@ -1,6 +1,7 @@
 # ruff: noqa: E501
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, cast
 
 from fastapi import Depends, FastAPI
@@ -36,7 +37,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard() -> str:
-        return DASHBOARD_HTML
+        html_file = Path(__file__).parent / "dashboard.html"
+        return html_file.read_text(encoding="utf-8") if html_file.exists() else DASHBOARD_HTML
 
     @app.get("/ready")
     async def ready(rt: BotRuntime = Depends(runtime)) -> dict[str, Any]:
@@ -59,7 +61,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/markets", dependencies=[Depends(require_admin)])
     async def markets(rt: BotRuntime = Depends(runtime)) -> list[dict[str, Any]]:
-        return cast(list[dict[str, Any]], (await rt.state.snapshot())["markets"])
+        snap = await rt.state.snapshot()
+        return cast(list[dict[str, Any]], snap["markets"] + snap.get("btc_interval_markets", []))
 
     @app.get("/positions", dependencies=[Depends(require_admin)])
     async def positions(rt: BotRuntime = Depends(runtime)) -> list[dict[str, Any]]:
