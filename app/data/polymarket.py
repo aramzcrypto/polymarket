@@ -224,7 +224,15 @@ class ClobTradingClient:
                 raise RuntimeError(
                     "API key, secret and passphrase are required when derive_api_creds=false"
                 )
-            client.set_api_creds(PyApiCreds(api_key=api_key, secret=secret, passphrase=passphrase))
+            try:
+                creds = PyApiCreds(
+                    api_key=api_key,
+                    api_secret=secret,
+                    api_passphrase=passphrase,
+                )
+            except TypeError:
+                creds = PyApiCreds(api_key=api_key, secret=secret, passphrase=passphrase)
+            client.set_api_creds(creds)
         self._client = client
         return client
 
@@ -233,8 +241,11 @@ class ClobTradingClient:
         return self._client or self.build()
 
     async def get_balance_allowance(self) -> BalanceSnapshot:
+        from py_clob_client.clob_types import AssetType, BalanceAllowanceParams
+
         def call() -> Any:
-            return self.client.get_balance_allowance({"asset_type": "COLLATERAL"})
+            params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+            return self.client.get_balance_allowance(params)
 
         payload = await asyncio.to_thread(call)
         return BalanceSnapshot(
