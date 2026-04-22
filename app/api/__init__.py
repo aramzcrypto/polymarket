@@ -1,0 +1,1 @@
+"""FastAPI admin service."""

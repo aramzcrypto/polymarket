@@ -1,0 +1,28 @@
+environment: staging
+log_level: INFO
+trading:
+  live_trading: false
+  live_trading_acknowledged: false
+  tiny_live_mode: true
+  tiny_live_max_order_size: "1"
+  require_geoblock_ok: true
+  require_balance_verified: true
+  require_ws_connected: true
+  cancel_all_on_startup: true
+  cancel_all_on_shutdown: true
+risk:
+  max_notional_exposure_per_market: "10"
+  max_total_account_exposure: "25"
+  max_order_size: "1"
+  max_daily_loss: "5"
+  max_drawdown: "10"
+  min_spread: "0.03"
+strategies:
+  conservative_mm:
+    enabled: true
+    markets: []
+    token_ids: []
+    min_spread: "0.04"
+    quote_size: "1"
+    max_quote_size: "1"
+

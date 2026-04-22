@@ -1,0 +1,38 @@
+strategies:
+  conservative_mm:
+    enabled: true
+    # User channel subscribes by condition IDs.
+    markets:
+      - "0xconditionid"
+    # Market channel subscribes by CLOB token/asset IDs.
+    token_ids:
+      - "123456789"
+    min_spread: "0.03"
+    quote_size: "5"
+    max_quote_size: "10"
+    min_quote_size: "1"
+    max_inventory_per_side: "20"
+    quote_ttl_seconds: 10
+    replace_threshold_ticks: 1
+    liquidity_fraction: "0.05"
+    inventory_skew_factor: "0.40"
+    volatility_widening_enabled: false
+    cross_market_enabled: false
+    event_signal_enabled: false
+  btc_5m_late_convexity:
+    enabled: true
+    market_query: "Bitcoin Up or Down - 5 Minutes"
+    bankroll: "50"
+    max_spend_per_signal: "1"
+    max_spend_per_market: "3"
+    max_quote_size: "25"
+    min_longshot_price: "0.005"
+    max_longshot_price: "0.12"
+    min_reward_multiple: "8"
+    min_edge: "0.015"
+    max_seconds_to_expiry: 75
+    min_seconds_to_expiry: 8
+    volatility_window_seconds: 180
+    default_volatility_bps: "18"
+    max_required_move_sigma: "1.35"
+    min_price_feed_agreement_bps: "25"

@@ -1,0 +1,47 @@
+environment: production
+log_level: INFO
+trading:
+  live_trading: false
+  live_trading_acknowledged: false
+  tiny_live_mode: true
+  tiny_live_max_order_size: "1"
+  require_geoblock_ok: true
+  require_balance_verified: true
+  require_ws_connected: true
+  cancel_all_on_startup: true
+  cancel_all_on_shutdown: true
+  post_only_quotes: true
+risk:
+  max_notional_exposure_per_market: "50"
+  max_total_account_exposure: "150"
+  max_order_size: "10"
+  max_daily_loss: "25"
+  max_drawdown: "50"
+  max_inventory_imbalance: "20"
+  max_open_orders_per_market: 4
+  stale_book_seconds: 3
+  max_slippage_bps: "150"
+  min_spread: "0.02"
+strategies:
+  conservative_mm:
+    enabled: false
+    markets: []
+    token_ids: []
+    min_spread: "0.03"
+    quote_size: "5"
+    max_quote_size: "10"
+  btc_5m_late_convexity:
+    enabled: false
+    market_query: "Bitcoin Up or Down - 5 Minutes"
+    bankroll: "50"
+    max_spend_per_signal: "1"
+    max_spend_per_market: "3"
+    max_quote_size: "25"
+    min_longshot_price: "0.005"
+    max_longshot_price: "0.12"
+    min_reward_multiple: "8"
+    min_edge: "0.015"
+    max_seconds_to_expiry: 75
+    min_seconds_to_expiry: 8
+    default_volatility_bps: "18"
+    max_required_move_sigma: "1.35"

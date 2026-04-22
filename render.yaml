@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: polymarket-btc-bot
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    preDeployCommand: alembic -c migrations/alembic.ini upgrade head
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: CONFIG_FILE
+        value: configs/production.yaml
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE__URL
+        fromDatabase:
+          name: polymarket-bot-db
+          property: connectionString
+      - key: TRADING__LIVE_TRADING
+        value: "false"
+      - key: TRADING__LIVE_TRADING_ACKNOWLEDGED
+        value: "false"
+      - key: TRADING__TINY_LIVE_MODE
+        value: "true"
+      - key: TRADING__TINY_LIVE_MAX_ORDER_SIZE
+        value: "1"
+      - key: ADMIN__TOKEN
+        generateValue: true
+      - key: POLYMARKET__PRIVATE_KEY
+        sync: false
+      - key: POLYMARKET__API_KEY
+        sync: false
+      - key: POLYMARKET__SECRET
+        sync: false
+      - key: POLYMARKET__PASSPHRASE
+        sync: false
+      - key: POLYMARKET__FUNDER_ADDRESS
+        sync: false
+      - key: POLYMARKET__SIGNATURE_TYPE
+        value: "1"
+      - key: POLYMARKET__DERIVE_API_CREDS
+        value: "false"
+
+databases:
+  - name: polymarket-bot-db
+    plan: basic-256mb
+    region: frankfurt
+    databaseName: polymarket
+    user: polymarket
+    postgresMajorVersion: "17"
