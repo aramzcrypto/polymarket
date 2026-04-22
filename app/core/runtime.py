@@ -241,8 +241,6 @@ class BotRuntime:
                 )
                 enabled = dict(self.state.strategy_enabled)
                 killed = self.state.kill_switch_enabled
-            if killed:
-                continue
             context = StrategyContext(inventory, live, tiny_cap)
             for book in books:
                 for name, strategy in self.strategies.items():
@@ -252,6 +250,8 @@ class BotRuntime:
                     latest_signal = getattr(strategy, "last_signals", [])[-1:]
                     for signal in latest_signal:
                         await self.state.record_strategy_signal(signal)
+                    if killed:
+                        continue
                     for quote in quotes:
                         await self.order_manager.submit_quote(quote)
 

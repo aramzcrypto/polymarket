@@ -31,7 +31,7 @@ strategies:
     quote_size: "5"
     max_quote_size: "10"
   btc_5m_late_convexity:
-    enabled: false
+    enabled: true
     market_query: "Bitcoin Up or Down - 5 Minutes"
     bankroll: "50"
     max_spend_per_signal: "1"
