@@ -76,6 +76,10 @@ The dashboard is available at:
 open http://localhost:8000/
 ```
 
+The dashboard and state endpoints require your `ADMIN__TOKEN`. Click `Set token` in the
+dashboard and paste the token from your `.env`; the token is stored only in your
+browser's local storage.
+
 For a $50 tiny-live test, start with:
 
 ```yaml
@@ -92,14 +96,15 @@ strategies:
 
 1. Confirm the deployment region is eligible using `/ready` and Polymarket geoblock response.
 2. Fund the correct proxy/funder wallet and verify token allowances/balances.
-3. Set tiny live mode: `TRADING__TINY_LIVE_MODE=true`.
-4. Set very small limits in `configs/production.yaml`.
-5. Start with one market and one token pair.
-6. Watch `/connectivity`, `/orders/open`, `/balances`, `/risk`, `/fills`, and alerts.
-7. Enable live only with both:
+3. Set a long random `ADMIN__TOKEN`; do not expose the dashboard without it.
+4. Set tiny live mode: `TRADING__TINY_LIVE_MODE=true`.
+5. Set very small limits in `configs/production.yaml`.
+6. Start with dry-run first and confirm live-looking signals appear without orders.
+7. Watch `/connectivity`, `/orders/open`, `/balances`, `/risk`, `/fills`, and alerts.
+8. Enable live only with both:
    - `TRADING__LIVE_TRADING=true`
    - `TRADING__LIVE_TRADING_ACKNOWLEDGED=true`
-8. Run for a short observation window, then widen limits only after reviewing fills, rejects, and PnL.
+9. Run for a short observation window, then widen limits only after reviewing fills, rejects, and PnL.
 
 ## Rollback Procedure
 

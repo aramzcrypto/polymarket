@@ -57,27 +57,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         kill_switch_gauge.set(1 if snap["kill_switch"]["enabled"] else 0)
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-    @app.get("/markets")
+    @app.get("/markets", dependencies=[Depends(require_admin)])
     async def markets(rt: BotRuntime = Depends(runtime)) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], (await rt.state.snapshot())["markets"])
 
-    @app.get("/positions")
+    @app.get("/positions", dependencies=[Depends(require_admin)])
     async def positions(rt: BotRuntime = Depends(runtime)) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], (await rt.state.snapshot())["positions"])
 
-    @app.get("/orders/open")
+    @app.get("/orders/open", dependencies=[Depends(require_admin)])
     async def open_orders(rt: BotRuntime = Depends(runtime)) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], (await rt.state.snapshot())["open_orders"])
 
-    @app.get("/balances")
+    @app.get("/balances", dependencies=[Depends(require_admin)])
     async def balances(rt: BotRuntime = Depends(runtime)) -> dict[str, Any]:
         return cast(dict[str, Any], (await rt.state.snapshot())["balances"])
 
-    @app.get("/pnl")
+    @app.get("/pnl", dependencies=[Depends(require_admin)])
     async def pnl(rt: BotRuntime = Depends(runtime)) -> dict[str, Any]:
         return cast(dict[str, Any], (await rt.state.snapshot())["pnl"])
 
-    @app.get("/risk")
+    @app.get("/risk", dependencies=[Depends(require_admin)])
     async def risk(rt: BotRuntime = Depends(runtime)) -> dict[str, Any]:
         snap = await rt.state.snapshot()
         return {
@@ -86,21 +86,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "counters": snap["counters"],
         }
 
-    @app.get("/strategies")
+    @app.get("/strategies", dependencies=[Depends(require_admin)])
     async def strategies(rt: BotRuntime = Depends(runtime)) -> dict[str, Any]:
         snap = await rt.state.snapshot()
         return {"enabled": snap["strategy_enabled"], "configured": list(rt.strategies)}
 
-    @app.get("/connectivity")
+    @app.get("/connectivity", dependencies=[Depends(require_admin)])
     async def connectivity(rt: BotRuntime = Depends(runtime)) -> dict[str, Any]:
         return cast(dict[str, Any], (await rt.state.snapshot())["connectivity"])
 
-    @app.get("/fills")
+    @app.get("/fills", dependencies=[Depends(require_admin)])
     async def fills(rt: BotRuntime = Depends(runtime)) -> list[dict[str, Any]]:
         async with rt.state.lock:
             return [fill.model_dump(mode="json") for fill in rt.state.fills]
 
-    @app.get("/dashboard/state")
+    @app.get("/dashboard/state", dependencies=[Depends(require_admin)])
     async def dashboard_state(rt: BotRuntime = Depends(runtime)) -> dict[str, Any]:
         snap = await rt.state.snapshot()
         return {
@@ -266,6 +266,7 @@ DASHBOARD_HTML = """
       <div class="muted" id="subtitle">Loading...</div>
     </div>
     <div class="toolbar">
+      <button id="authButton" onclick="setAdminToken()">Set token</button>
       <span class="pill" id="mode">mode</span>
       <span class="pill" id="ready">ready</span>
       <span class="pill" id="kill">kill</span>
@@ -314,11 +315,27 @@ DASHBOARD_HTML = """
     function cls(ok) { return ok ? 'good' : 'bad'; }
     function cell(v) { return v === null || v === undefined ? '-' : String(v); }
     function pct(v) { return v === null || v === undefined ? '-' : (Number(v) * 100).toFixed(2) + '%'; }
+    function adminToken() { return localStorage.getItem('polymarketAdminToken') || ''; }
+    function authHeaders(extra = {}) {
+      const token = adminToken();
+      return token ? { ...extra, 'Authorization': 'Bearer ' + token } : extra;
+    }
+    function setAdminToken() {
+      const token = prompt('Admin bearer token', adminToken());
+      if (!token) return;
+      localStorage.setItem('polymarketAdminToken', token.trim());
+      refresh();
+    }
     function rows(items, render) {
       return items.length ? items.map(render).join('') : '<tr><td colspan="8" class="muted">No data yet</td></tr>';
     }
     async function refresh() {
-      const r = await fetch('/dashboard/state');
+      const r = await fetch('/dashboard/state', { headers: authHeaders() });
+      if (r.status === 401 || r.status === 503) {
+        document.getElementById('subtitle').textContent = 'Admin token required';
+        setAdminToken();
+        return;
+      }
       const s = await r.json();
       const coinbase = s.btc.prices.coinbase;
       document.getElementById('subtitle').textContent = new Date().toLocaleString();
@@ -355,11 +372,9 @@ DASHBOARD_HTML = """
         <tr><td>${x.side}</td><td>${x.price}</td><td>${fmt.format(Number(x.size))}</td><td>${x.status}</td><td class="muted">${x.market.slice(0, 12)}...</td></tr>`);
     }
     async function killSwitch() {
-      const token = prompt('Admin bearer token');
-      if (!token) return;
       await fetch('/admin/kill-switch', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token, 'content-type': 'application/json' },
+        headers: authHeaders({ 'content-type': 'application/json' }),
         body: JSON.stringify({ reason: 'dashboard' })
       });
       await refresh();
