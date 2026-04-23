@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -7,6 +8,32 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.types import Fill, OpenOrder, QuoteIntent, RiskDecision
+
+logger = logging.getLogger(__name__)
+
+
+class NullRepository:
+    """No-op repository used when no database is configured."""
+
+    async def raw_event(self, source: str, event_type: str, payload: dict[str, Any]) -> None:
+        return
+
+    async def order_decision(
+        self, quote: QuoteIntent, decision: RiskDecision, response: dict[str, Any] | None
+    ) -> None:
+        return
+
+    async def open_order(self, order: OpenOrder) -> None:
+        return
+
+    async def fill(self, fill: Fill) -> None:
+        return
+
+    async def recent_fills(self, limit: int = 500) -> list[Fill]:
+        return []
+
+    async def admin_audit(self, action: str, payload: dict[str, Any]) -> None:
+        return
 
 
 class EventRepository:
@@ -106,6 +133,42 @@ class EventRepository:
                 fill.model_dump(mode="json"),
             )
             await session.commit()
+
+    async def recent_fills(self, limit: int = 500) -> list[Fill]:
+        async with self.session_factory() as session:
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        select *
+                        from (
+                            select trade_id, order_id, market, token_id, side, price,
+                                   size, fee, status, created_at
+                            from fills
+                            order by created_at desc
+                            limit :limit
+                        ) recent
+                        order by created_at asc
+                        """
+                    ),
+                    {"limit": limit},
+                )
+            ).mappings()
+            return [
+                Fill(
+                    trade_id=str(row["trade_id"]),
+                    order_id=row["order_id"],
+                    market=str(row["market"]),
+                    token_id=str(row["token_id"]),
+                    side=str(row["side"]),
+                    price=row["price"],
+                    size=row["size"],
+                    fee=row["fee"],
+                    status=str(row["status"]),
+                    timestamp=row["created_at"],
+                )
+                for row in rows
+            ]
 
     async def admin_audit(self, action: str, payload: dict[str, Any]) -> None:
         async with self.session_factory() as session:

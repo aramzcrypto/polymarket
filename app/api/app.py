@@ -116,12 +116,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "pnl": snap["pnl"],
             "balances": snap["balances"],
             "open_orders": snap["open_orders"],
+            "positions": snap["positions"],
             "fills": [fill.model_dump(mode="json") for fill in rt.state.fills[-50:]],
-            "btc": {
-                "prices": snap["crypto_prices"],
-                "markets": snap["btc_interval_markets"],
-                "signals": snap["strategy_signals"],
-            },
+            "crypto_prices": snap["crypto_prices"],
+            "btc_interval_markets": snap["btc_interval_markets"],
+            "strategy_signals": snap["strategy_signals"],
+            "price_history": snap["price_history"],
             "risk": {
                 "limits": rt.settings.risk.model_dump(mode="json"),
                 "counters": snap["counters"],
@@ -142,7 +142,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/admin/kill-switch/reset", dependencies=[Depends(require_admin)])
     async def reset_kill_switch(rt: BotRuntime = Depends(runtime)) -> dict[str, Any]:
-        await rt.state.set_kill_switch(False, None)
+        await rt.state.reset_risk_latches()
         await rt.repository.admin_audit("kill_switch_reset", {})
         return {"enabled": False}
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from app.config.settings import Settings, TradingSettings
@@ -15,6 +17,14 @@ class DummyClient(ClobTradingClient):
         pass
 
 
+class FailingClient(ClobTradingClient):
+    def __init__(self) -> None:
+        pass
+
+    async def create_and_post_limit_order(self, quote: object) -> dict[str, object]:
+        raise RuntimeError("post failed before order reached CLOB")
+
+
 async def ready_state() -> BotState:
     state = BotState()
     state.books["token"] = OrderBook(
@@ -25,6 +35,8 @@ async def ready_state() -> BotState:
         timestamp=utc_now(),
     )
     state.balances.verified = True
+    state.balances.collateral = Decimal("10")
+    state.balances.allowance = Decimal("10")
     state.connectivity.market_ws_connected = True
     state.connectivity.user_ws_connected = True
     state.connectivity.auth_valid = True
@@ -74,3 +86,29 @@ async def test_cancel_all_in_dry_run_clears_state() -> None:
     result = await manager.cancel_all("test")
     assert result["dry_run"] is True
     assert not state.open_orders
+
+
+@pytest.mark.asyncio
+async def test_live_post_exception_releases_duplicate_guard() -> None:
+    settings = Settings(
+        trading=TradingSettings(live_trading=True, live_trading_acknowledged=True)
+    )
+    state = await ready_state()
+    risk = RiskEngine(state, settings.risk, settings.trading)
+    manager = OrderManager(settings, state, risk, FailingClient())
+    quote = QuoteIntent(
+        strategy="test",
+        market="0xmarket",
+        token_id="token",
+        side=OrderSide.BUY,
+        price="0.49",
+        size="1",
+    )
+
+    with pytest.raises(RuntimeError):
+        await manager.submit_quote(quote)
+
+    retry = await risk.pre_trade(
+        quote.model_copy(update={"client_order_key": manager.client_order_key(quote)})
+    )
+    assert retry.allowed

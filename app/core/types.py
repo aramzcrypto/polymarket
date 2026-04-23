@@ -35,6 +35,7 @@ class RejectReason(StrEnum):
     STALE_BOOK = "stale_book"
     WS_DISCONNECTED = "ws_disconnected"
     BALANCE_UNVERIFIED = "balance_unverified"
+    INSUFFICIENT_BALANCE = "insufficient_balance"
     AUTH_INVALID = "auth_invalid"
     RATE_LIMIT_PRESSURE = "rate_limit_pressure"
     COMPLIANCE_BLOCKED = "compliance_blocked"
@@ -216,6 +217,7 @@ class Fill(BaseModel):
     order_id: str | None = None
     market: str
     token_id: str
+    outcome: str = ""
     side: OrderSide
     price: Decimal
     size: Decimal
@@ -295,10 +297,11 @@ class BtcIntervalMarket(BaseModel):
     up_token_id: str
     down_token_id: str
     tick_size: Decimal = Decimal("0.01")
+    order_min_size: Decimal = Decimal("5")
     neg_risk: bool = False
     raw: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("price_to_beat", "tick_size", mode="before")
+    @field_validator("price_to_beat", "tick_size", "order_min_size", mode="before")
     @classmethod
     def parse_optional_decimal(cls, value: Any) -> Decimal | None:
         return None if value is None else decimalize(value)

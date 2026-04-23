@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from datetime import timedelta
 from decimal import Decimal
 
 from app.config.settings import StrategyConfig
@@ -15,9 +16,7 @@ from app.core.types import (
     OrderType,
     QuoteIntent,
     RiskDecision,
-    StrategySignal,
     utc_now,
-    quantize_to_tick,
 )
 from app.strategies.base import Strategy, StrategyContext
 
@@ -63,7 +62,6 @@ class BtcMomentumStrategy(Strategy):
         return None
 
     def _capture_open_prices(self, price: CryptoPriceSnapshot) -> None:
-        from datetime import timedelta
         capture_grace = timedelta(seconds=12)
         for market in self.markets_by_condition.values():
             if market.condition_id in self.open_prices_by_market:
@@ -107,56 +105,78 @@ class BtcMomentumStrategy(Strategy):
         market = self.markets_by_token.get(book.asset_id)
         if market is None:
             return []
-            
+
         if market.condition_id in self.filled_markets:
             return []
-            
+
         seconds_to_expiry = (market.end_time - utc_now()).total_seconds()
-        if seconds_to_expiry < self.config.min_seconds_to_expiry or seconds_to_expiry > self.config.max_seconds_to_expiry:
+        if (
+            seconds_to_expiry < self.config.min_seconds_to_expiry
+            or seconds_to_expiry > self.config.max_seconds_to_expiry
+        ):
             return []
-            
+
         outcome = "UP" if book.asset_id == market.up_token_id else "DOWN"
         prob = self._outcome_probability(market, outcome, seconds_to_expiry)
-        
+
         if prob is None:
             return []
-            
+
         ask = book.best_ask
         if ask is None:
             return []
-            
+
         edge = prob - ask
         if edge < self.config.min_edge:
             return []
-            
+
         # We found a mispriced token according to our model. Fire FAK!
         current_position = Decimal(str(context.inventory_by_token.get(book.asset_id, 0)))
         if current_position > ZERO:
             return []
-            
+
         already_live = context.live_orders_by_token.get(book.asset_id, 0)
         if already_live > 0:
             return []
-            
-        # Entry price: be slightly aggressive to cross the spread
-        quote_price = min(Decimal("0.99"), ask + market.tick_size * Decimal(self.config.entry_price_buffer_ticks))
-        
-        spend = min(self.config.max_spend_per_signal, self.config.bankroll * self.config.kelly_fraction)
+
+        buffered = ask + market.tick_size * Decimal(self.config.entry_price_buffer_ticks)
+        quote_price = min(Decimal("0.99"), buffered)
+        if self.config.max_entry_price_buffer_bps > ZERO:
+            max_buffered = ask * (
+                Decimal("1") + self.config.max_entry_price_buffer_bps / Decimal("10000")
+            )
+            if quote_price > max_buffered:
+                quote_price = ask
+
+        spend = min(
+            self.config.max_spend_per_signal,
+            self.config.bankroll * self.config.kelly_fraction,
+        )
         if spend < self.config.min_spend_per_signal:
             return []
-            
+
         size = min(self.config.max_quote_size, spend / quote_price)
         if context.tiny_live_cap is not None:
             size = min(size, Decimal(str(context.tiny_live_cap)))
         if size < market.order_min_size:
             size = market.order_min_size
-            
+
         notional = size * quote_price
-        if notional < self.config.min_spend_per_signal:
+        if (
+            notional < self.config.min_spend_per_signal
+            or notional > self.config.max_spend_per_signal
+        ):
             return []
-            
-        logger.info(f"MOMENTUM SPOTTED: {market.slug} | outcome={outcome} | prob={prob:.4f} | ask={ask:.4f} | edge={edge:.4f}")
-        
+
+        logger.info(
+            "MOMENTUM SPOTTED: %s | outcome=%s | prob=%.4f | ask=%.4f | edge=%.4f",
+            market.slug,
+            outcome,
+            prob,
+            ask,
+            edge,
+        )
+
         return [
             QuoteIntent(
                 strategy=self.name,

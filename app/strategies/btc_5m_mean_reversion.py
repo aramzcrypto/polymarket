@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from datetime import timedelta
 from decimal import Decimal
 
 from app.config.settings import StrategyConfig
@@ -14,9 +15,8 @@ from app.core.types import (
     OrderSide,
     QuoteIntent,
     RiskDecision,
-    StrategySignal,
-    utc_now,
     quantize_to_tick,
+    utc_now,
 )
 from app.strategies.base import Strategy, StrategyContext
 
@@ -60,7 +60,6 @@ class BtcMeanReversionStrategy(Strategy):
         return None
 
     def _capture_open_prices(self, price: CryptoPriceSnapshot) -> None:
-        from datetime import timedelta
         capture_grace = timedelta(seconds=12)
         for market in self.markets_by_condition.values():
             if market.condition_id in self.open_prices_by_market:
@@ -117,44 +116,55 @@ class BtcMeanReversionStrategy(Strategy):
         market = self.markets_by_token.get(book.asset_id)
         if market is None:
             return []
-        
+
         seconds_to_expiry = (market.end_time - utc_now()).total_seconds()
-        # Early-interval focus: stop quoting if we are too close to expiry
-        if seconds_to_expiry < self.config.min_seconds_to_expiry:
+        if (
+            seconds_to_expiry < self.config.min_seconds_to_expiry
+            or seconds_to_expiry > self.config.max_seconds_to_expiry
+        ):
             return []
-            
+
         outcome = "UP" if book.asset_id == market.up_token_id else "DOWN"
         prob = self._outcome_probability(market, outcome, seconds_to_expiry)
-        
+
         if prob is None:
             return []
-            
+
+        if book.spread is None or book.spread < self.config.min_spread:
+            return []
+
         edge = self.config.min_edge
         bid_price = quantize_to_tick(prob - edge, market.tick_size, side=OrderSide.BUY)
         ask_price = quantize_to_tick(prob + edge, market.tick_size, side=OrderSide.SELL)
-        
+
         inventory = Decimal(str(context.inventory_by_token.get(book.asset_id, 0)))
         buy_size = self._quote_size(inventory, OrderSide.BUY)
-        sell_size = self._quote_size(inventory, OrderSide.SELL)
-        
+        sell_size = min(inventory, self._quote_size(inventory, OrderSide.SELL))
+
         if context.tiny_live_cap is not None:
             cap = Decimal(str(context.tiny_live_cap))
             buy_size = min(buy_size, cap)
             sell_size = min(sell_size, cap)
-            
+        if context.live_orders_by_token.get(book.asset_id, 0) > 0:
+            return []
+        if ZERO < buy_size < market.order_min_size:
+            buy_size = market.order_min_size
+        if ZERO < sell_size < market.order_min_size:
+            sell_size = ZERO
+
         quotes: list[QuoteIntent] = []
         if buy_size > ZERO and Decimal("0") < bid_price < Decimal("1"):
             quotes.append(
                 QuoteIntent(
                     strategy=self.name,
-                    market=book.market,
+                    market=market.condition_id,
                     token_id=book.asset_id,
                     side=OrderSide.BUY,
                     price=bid_price,
                     size=buy_size,
                     tick_size=market.tick_size,
                     neg_risk=market.neg_risk,
-                    post_only=True, # Passive liquidity provision
+                    post_only=True,
                     reason=f"mean_reversion_bid; prob={prob:.4f}",
                 )
             )
@@ -162,7 +172,7 @@ class BtcMeanReversionStrategy(Strategy):
             quotes.append(
                 QuoteIntent(
                     strategy=self.name,
-                    market=book.market,
+                    market=market.condition_id,
                     token_id=book.asset_id,
                     side=OrderSide.SELL,
                     price=ask_price,

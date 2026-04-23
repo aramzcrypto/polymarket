@@ -23,16 +23,21 @@ strategies:
     enabled: true
     market_query: "Bitcoin Up or Down - 5 Minutes"
     bankroll: "50"
-    max_spend_per_signal: "1"
-    max_spend_per_market: "3"
+    kelly_fraction: "0.06"
+    min_spend_per_signal: "1.25"
+    max_spend_per_signal: "3"
+    max_spend_per_market: "9"
     max_quote_size: "25"
     min_longshot_price: "0.005"
-    max_longshot_price: "0.12"
-    min_reward_multiple: "8"
-    min_edge: "0.015"
-    max_seconds_to_expiry: 75
-    min_seconds_to_expiry: 8
+    max_longshot_price: "0.35"
+    min_reward_multiple: "2.75"
+    min_edge: "0"
+    high_confidence_probability: "0.06"
+    entry_price_buffer_ticks: 1
+    max_entry_price_buffer_bps: "2500"
+    max_seconds_to_expiry: 120
+    min_seconds_to_expiry: 6
     volatility_window_seconds: 180
-    default_volatility_bps: "18"
-    max_required_move_sigma: "1.35"
+    default_volatility_bps: "36"
+    max_required_move_sigma: "2.25"
     min_price_feed_agreement_bps: "25"

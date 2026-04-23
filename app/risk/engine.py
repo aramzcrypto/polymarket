@@ -44,10 +44,29 @@ class RiskEngine:
             return quote.price < min_price
         return False
 
-    def _spread_floor_rejected(self, book: OrderBook | None) -> bool:
+    def _spread_floor_rejected(self, quote: QuoteIntent, book: OrderBook | None) -> bool:
+        if not quote.post_only:
+            return False
         if book is None or book.spread is None:
             return True
         return book.spread < self.limits.min_spread
+
+    def _should_count_rejection(self, reasons: list[RejectReason]) -> bool:
+        operational_reasons = {
+            RejectReason.WS_DISCONNECTED,
+            RejectReason.BALANCE_UNVERIFIED,
+            RejectReason.INSUFFICIENT_BALANCE,
+            RejectReason.AUTH_INVALID,
+            RejectReason.RATE_LIMIT_PRESSURE,
+            RejectReason.COMPLIANCE_BLOCKED,
+            RejectReason.STALE_BOOK,
+            RejectReason.DUPLICATE_ORDER,
+        }
+        return any(reason not in operational_reasons for reason in reasons)
+
+    def forget_client_order_key(self, key: str | None) -> None:
+        if key:
+            self.seen_client_order_keys.discard(key)
 
     async def pre_trade(self, quote: QuoteIntent) -> RiskDecision:
         async with self.state.lock:
@@ -62,6 +81,15 @@ class RiskEngine:
                 reasons.append(RejectReason.WS_DISCONNECTED)
             if self.trading.require_balance_verified and not self.state.balances.verified:
                 reasons.append(RejectReason.BALANCE_UNVERIFIED)
+            if (
+                self.trading.live_enabled
+                and self.trading.require_balance_verified
+                and (
+                    self.state.balances.collateral <= ZERO
+                    or self.state.balances.allowance <= ZERO
+                )
+            ):
+                reasons.append(RejectReason.INSUFFICIENT_BALANCE)
             if not self.state.connectivity.auth_valid:
                 reasons.append(RejectReason.AUTH_INVALID)
             if self.trading.require_geoblock_ok and not self.state.connectivity.compliance_ok:
@@ -103,12 +131,13 @@ class RiskEngine:
                 reasons.append(RejectReason.DUPLICATE_ORDER)
             if self._slippage_rejected(quote, book):
                 reasons.append(RejectReason.SLIPPAGE)
-            if self._spread_floor_rejected(book):
+            if self._spread_floor_rejected(quote, book):
                 reasons.append(RejectReason.SPREAD_FLOOR)
             if quote.price <= ZERO or quote.price >= Decimal("1") or quote.size <= ZERO:
                 reasons.append(RejectReason.INVALID_QUOTE)
             if reasons:
-                self.state.rejected_order_count += 1
+                if self._should_count_rejection(reasons):
+                    self.state.rejected_order_count += 1
                 self.state.last_rejection_at = datetime.now(tz=UTC)
                 return RiskDecision(
                     allowed=False, reasons=reasons, message="pre-trade risk rejection"

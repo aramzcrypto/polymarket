@@ -15,6 +15,10 @@ class AlertNotifier:
     def __init__(self, settings: AlertSettings) -> None:
         self.settings = settings
 
+    @property
+    def enabled(self) -> bool:
+        return self.settings.telegram_enabled or self.settings.email_enabled
+
     async def send(self, title: str, body: str) -> None:
         if self.settings.telegram_enabled:
             await self._telegram(title, body)

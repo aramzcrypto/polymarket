@@ -9,7 +9,7 @@ from app.core.state import BotState
 from app.core.types import OpenOrder, QuoteIntent, TradingMode, utc_now
 from app.data.polymarket import ClobTradingClient
 from app.risk.engine import RiskEngine
-from app.storage.repositories import EventRepository
+from app.storage.repositories import EventRepository, NullRepository
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class OrderManager:
         state: BotState,
         risk: RiskEngine,
         trading_client: ClobTradingClient,
-        repository: EventRepository | None = None,
+        repository: EventRepository | NullRepository | None = None,
     ) -> None:
         self.settings = settings
         self.state = state
@@ -65,7 +65,13 @@ class OrderManager:
                 "status": "simulated",
             }
         else:
-            response = await self.trading_client.create_and_post_limit_order(quote)
+            try:
+                response = await self.trading_client.create_and_post_limit_order(quote)
+            except Exception:
+                self.risk.forget_client_order_key(key)
+                raise
+            if not response.get("success"):
+                self.risk.forget_client_order_key(key)
         if response.get("success") or response.get("dry_run"):
             order = OpenOrder(
                 order_id=str(response.get("orderID") or response.get("order_id")),

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from app.config.settings import Settings
 from app.strategies.base import Strategy
-from app.strategies.btc_late_convexity import BtcLateConvexityStrategy
-from app.strategies.conservative_mm import ConservativeMarketMakerStrategy
 from app.strategies.btc_5m_mean_reversion import BtcMeanReversionStrategy
 from app.strategies.btc_5m_momentum import BtcMomentumStrategy
+from app.strategies.btc_late_convexity import BtcLateConvexityStrategy
+from app.strategies.conservative_mm import ConservativeMarketMakerStrategy
 
 
 def build_strategies(settings: Settings) -> dict[str, Strategy]:

@@ -58,6 +58,17 @@ async def test_rejects_stale_book() -> None:
 
 
 @pytest.mark.asyncio
+async def test_spread_floor_does_not_reject_taker_fak_quote() -> None:
+    state = await ready_state()
+    engine = RiskEngine(state, RiskLimits(min_spread="0.10"), TradingSettings())
+    taker_quote = quote()
+    taker_quote.post_only = False
+    decision = await engine.pre_trade(taker_quote)
+    assert RejectReason.SPREAD_FLOOR not in decision.reasons
+    assert decision.allowed
+
+
+@pytest.mark.asyncio
 async def test_rejects_oversized_order() -> None:
     state = await ready_state()
     engine = RiskEngine(state, RiskLimits(max_order_size="1"), TradingSettings())
@@ -96,3 +107,34 @@ async def test_tiny_live_cap_rejects() -> None:
     engine = RiskEngine(state, RiskLimits(max_order_size="10"), trading)
     decision = await engine.pre_trade(quote(size="2"))
     assert RejectReason.MAX_ORDER_SIZE in decision.reasons
+
+
+@pytest.mark.asyncio
+async def test_live_zero_balance_rejects_without_tripping_rejection_counter() -> None:
+    state = await ready_state()
+    trading = TradingSettings(live_trading=True, live_trading_acknowledged=True)
+    engine = RiskEngine(state, RiskLimits(), trading)
+    decision = await engine.pre_trade(quote())
+    assert RejectReason.INSUFFICIENT_BALANCE in decision.reasons
+    assert state.rejected_order_count == 0
+
+
+@pytest.mark.asyncio
+async def test_ws_disconnected_rejects_without_tripping_rejection_counter() -> None:
+    state = await ready_state()
+    state.connectivity.user_ws_connected = False
+    engine = RiskEngine(state, RiskLimits(), TradingSettings(require_ws_connected=True))
+    decision = await engine.pre_trade(quote())
+    assert RejectReason.WS_DISCONNECTED in decision.reasons
+    assert state.rejected_order_count == 0
+
+
+@pytest.mark.asyncio
+async def test_duplicate_rejects_without_tripping_rejection_counter() -> None:
+    state = await ready_state()
+    engine = RiskEngine(state, RiskLimits(), TradingSettings())
+    first = await engine.pre_trade(quote())
+    second = await engine.pre_trade(quote())
+    assert first.allowed
+    assert RejectReason.DUPLICATE_ORDER in second.reasons
+    assert state.rejected_order_count == 0

@@ -37,23 +37,23 @@ strategies:
     market_query: "Bitcoin Up or Down - 5 Minutes"
     bankroll: "50"
     kelly_fraction: "0.06"
-    min_spend_per_signal: "1.25"
-    max_spend_per_signal: "3.00"
-    max_spend_per_market: "9"
-    max_quote_size: "200"
-    min_longshot_price: "0.005"
-    max_longshot_price: "0.35"
-    min_reward_multiple: "2.75"
+    min_spend_per_signal: "1.00"
+    max_spend_per_signal: "1.00"
+    max_spend_per_market: "5"
+    max_quote_size: "2500"
+    min_longshot_price: "0.001"
+    max_longshot_price: "0.10"
+    min_reward_multiple: "10.0"
     min_edge: "0"
     high_confidence_probability: "0.06"
     entry_price_buffer_ticks: 1
     max_entry_price_buffer_bps: "2500"
-    max_seconds_to_expiry: 120
-    min_seconds_to_expiry: 6
+    max_seconds_to_expiry: 45
+    min_seconds_to_expiry: 5
     default_volatility_bps: "36"
-    max_required_move_sigma: "2.25"
+    max_required_move_sigma: "3.5"
   btc_5m_mean_reversion:
-    enabled: true
+    enabled: false
     market_query: "Bitcoin Up or Down - 5 Minutes"
     quote_size: "2"
     max_quote_size: "10"
@@ -62,7 +62,7 @@ strategies:
     min_seconds_to_expiry: 60
     default_volatility_bps: "36"
   btc_5m_momentum:
-    enabled: true
+    enabled: false
     market_query: "Bitcoin Up or Down - 5 Minutes"
     bankroll: "50"
     kelly_fraction: "0.05"

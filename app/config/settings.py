@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import logging
 import os
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml  # type: ignore[import-untyped]
+import yaml  # type: ignore[import-untyped, unused-ignore]
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.types import TradingMode, decimalize
+
+logger = logging.getLogger(__name__)
 
 
 class PolymarketSettings(BaseModel):
@@ -108,8 +111,12 @@ class StrategyConfig(BaseModel):
     max_longshot_price: Decimal = Decimal("0.12")
     min_reward_multiple: Decimal = Decimal("8")
     min_edge: Decimal = Decimal("0.015")
-    max_spend_per_signal: Decimal = Decimal("1")
+    high_confidence_probability: Decimal = Decimal("0.10")
+    min_spend_per_signal: Decimal = Decimal("2")
+    max_spend_per_signal: Decimal = Decimal("5")
     max_spend_per_market: Decimal = Decimal("3")
+    entry_price_buffer_ticks: int = Field(default=0, ge=0)
+    max_entry_price_buffer_bps: Decimal = Decimal("0")
     bankroll: Decimal = Decimal("50")
     kelly_fraction: Decimal = Decimal("0.05")
     volatility_window_seconds: float = 180.0
@@ -131,8 +138,11 @@ class StrategyConfig(BaseModel):
         "max_longshot_price",
         "min_reward_multiple",
         "min_edge",
+        "high_confidence_probability",
+        "min_spend_per_signal",
         "max_spend_per_signal",
         "max_spend_per_market",
+        "max_entry_price_buffer_bps",
         "bankroll",
         "kelly_fraction",
         "default_volatility_bps",
@@ -187,6 +197,9 @@ class AlertSettings(BaseModel):
     telegram_enabled: bool = False
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
+    trade_notifications_enabled: bool = True
+    summary_notifications_enabled: bool = True
+    summary_interval_seconds: float = 1800.0
     email_enabled: bool = False
     smtp_host: str | None = None
     smtp_port: int = 587
@@ -220,15 +233,51 @@ class Settings(BaseSettings):
 
     @classmethod
     def from_yaml_and_env(cls, path: str | None = None) -> Settings:
-        config_path = path or os.getenv("CONFIG_FILE")
-        data: dict[str, Any] = {}
+        # CONFIG_FILE is typically set in the .env file read by pydantic-settings,
+        # not in the OS environment (os.getenv returns None for .env-only vars).
+        # Construct a minimal Settings() instance to resolve config_file properly.
+        _env_settings = cls()
+        config_path = path or os.getenv("CONFIG_FILE") or _env_settings.config_file
+        yaml_data: dict[str, Any] = {}
         if config_path and Path(config_path).exists():
             with Path(config_path).open("r", encoding="utf-8") as handle:
                 loaded = yaml.safe_load(handle) or {}
                 if not isinstance(loaded, dict):
                     raise ValueError("Config YAML must contain an object")
-                data = loaded
-        return cls(**data)
+                yaml_data = loaded
+
+        # _env_settings already has all env/credential values correctly loaded.
+        settings = _env_settings
+
+        # Strategies must come from YAML — pydantic-settings always resets this
+        # dict to its default_factory because no STRATEGIES__ env vars exist.
+        # Inject them via model_copy which bypasses the env source stack.
+        updates: dict[str, Any] = {}
+        if "strategies" in yaml_data and not any(
+            k.upper().startswith("STRATEGIES__") for k in os.environ
+        ):
+            updates["strategies"] = {
+                name: StrategyConfig.model_validate(cfg)
+                for name, cfg in yaml_data["strategies"].items()
+            }
+        # Apply YAML overrides for risk and trading settings.
+        # ENV vars already have precedence in _env_settings.
+        if "risk" in yaml_data:
+            try:
+                merged = {**settings.risk.model_dump(), **yaml_data["risk"]}
+                updates["risk"] = RiskLimits.model_validate(merged)
+            except Exception as exc:
+                logger.warning(f"failed to merge YAML risk settings: {exc}")
+        if "trading" in yaml_data:
+            try:
+                merged = {**settings.trading.model_dump(), **yaml_data["trading"]}
+                updates["trading"] = TradingSettings.model_validate(merged)
+            except Exception as exc:
+                logger.warning(f"failed to merge YAML trading settings: {exc}")
+
+        if updates:
+            settings = settings.model_copy(update=updates)
+        return settings
 
 
 def load_settings() -> Settings:

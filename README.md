@@ -57,17 +57,18 @@ The included `conservative_mm` strategy estimates fair value from midpoint plus 
 
 ## BTC 5-Minute Late Convexity Strategy
 
-The `btc_5m_late_convexity` strategy is based on buying a tiny amount of the losing side near expiry when the payout is large but the required BTC move is still statistically plausible.
+The `btc_5m_late_convexity` strategy is based on buying the cheaper late-reversal side near expiry when the payout is large and the market still has enough time to flip.
 
 It does not buy every cheap longshot. It requires:
 
 - Fresh BTC spot data from Coinbase, with optional Binance agreement check.
 - A discovered active "Bitcoin Up or Down - 5 Minutes" market.
-- A parsed price-to-beat from market metadata.
+- A parsed price-to-beat from market metadata, or an interval open price captured at market start.
 - Time remaining inside `min_seconds_to_expiry` and `max_seconds_to_expiry`.
 - Offered ask price inside the configured longshot band.
 - Reward multiple above `min_reward_multiple`.
-- Estimated probability minus offered price above `min_edge`.
+- Optional confidence sizing from the BTC move model.
+- Optional `entry_price_buffer_ticks`, bounded by `max_entry_price_buffer_bps`, for a more marketable FAK limit buy above the current ask.
 - Risk checks still pass before any order is submitted.
 
 The dashboard is available at:
@@ -87,9 +88,17 @@ strategies:
   btc_5m_late_convexity:
     enabled: true
     bankroll: "50"
-    max_spend_per_signal: "1"
-    max_spend_per_market: "3"
+    kelly_fraction: "0.06"
+    min_spend_per_signal: "1.25"
+    max_spend_per_signal: "3"
+    max_spend_per_market: "9"
     max_quote_size: "25"
+    max_longshot_price: "0.35"
+    min_reward_multiple: "2.75"
+    max_seconds_to_expiry: 120
+    min_seconds_to_expiry: 6
+    entry_price_buffer_ticks: 1
+    max_entry_price_buffer_bps: "2500"
 ```
 
 ## Live Deployment Checklist

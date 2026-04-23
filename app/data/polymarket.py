@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
+import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -23,6 +25,14 @@ from app.core.types import (
 )
 
 logger = logging.getLogger(__name__)
+USDC_BASE_UNITS = Decimal("1000000")
+
+
+def decimalize_usdc_amount(value: Any) -> Decimal:
+    amount = decimalize(value or "0")
+    if isinstance(value, str) and "." in value:
+        return amount
+    return amount / USDC_BASE_UNITS
 
 
 def _loads_array(value: Any) -> list[Any]:
@@ -47,6 +57,14 @@ def _parse_dt(value: Any) -> datetime | None:
         return None
 
 
+def _btc_slug_interval(slug: Any) -> tuple[datetime, datetime] | None:
+    match = re.search(r"btc-updown-5m-(\d+)", str(slug or ""))
+    if not match:
+        return None
+    end_time = datetime.fromtimestamp(int(match.group(1)), tz=UTC)
+    return end_time - timedelta(minutes=5), end_time
+
+
 def _extract_price_to_beat(item: dict[str, Any]) -> Decimal | None:
     candidates = [
         item.get("line"),
@@ -54,6 +72,9 @@ def _extract_price_to_beat(item: dict[str, Any]) -> Decimal | None:
         item.get("price_to_beat"),
         item.get("xAxisValue"),
     ]
+    event_metadata = item.get("eventMetadata")
+    if isinstance(event_metadata, dict):
+        candidates.append(event_metadata.get("priceToBeat"))
     text = " ".join(
         str(item.get(key, "")) for key in ("question", "description", "groupItemTitle", "slug")
     )
@@ -84,15 +105,25 @@ def parse_btc_interval_market(item: dict[str, Any]) -> BtcIntervalMarket | None:
             down_idx = outcomes.index("no")
         except ValueError:
             return None
-    end_time = _parse_dt(item.get("endDate") or item.get("end_date"))
+    slug_interval = _btc_slug_interval(item.get("slug"))
+    end_time = (
+        slug_interval[1]
+        if slug_interval
+        else _parse_dt(item.get("endDate") or item.get("end_date"))
+    )
     if end_time is None:
         return None
+    start_time = (
+        slug_interval[0]
+        if slug_interval
+        else _parse_dt(item.get("startDate") or item.get("start_date"))
+    )
     return BtcIntervalMarket(
         market_id=str(item.get("id", "")),
         condition_id=str(item.get("conditionId") or item.get("condition_id") or ""),
         question=str(item.get("question", "")),
         slug=item.get("slug"),
-        start_time=_parse_dt(item.get("startDate") or item.get("start_date")),
+        start_time=start_time,
         end_time=end_time,
         price_to_beat=_extract_price_to_beat(item),
         up_token_id=token_ids[up_idx],
@@ -101,6 +132,7 @@ def parse_btc_interval_market(item: dict[str, Any]) -> BtcIntervalMarket | None:
         or item.get("minimum_tick_size")
         or item.get("minTickSize")
         or "0.01",
+        order_min_size=item.get("orderMinSize") or item.get("order_min_size") or "5",
         neg_risk=bool(item.get("negRisk") or item.get("neg_risk") or False),
         raw=item,
     )
@@ -149,6 +181,13 @@ class PolymarketREST:
         return cast(list[dict[str, Any]], payload.get("data", []))
 
     @retry(wait=wait_exponential(multiplier=0.25, min=0.25, max=5), stop=stop_after_attempt(3))
+    async def gamma_events_by_slug(self, slug: str) -> list[dict[str, Any]]:
+        response = await self.http.get(f"{self.settings.gamma_host}/events", params={"slug": slug})
+        response.raise_for_status()
+        payload = response.json()
+        return cast(list[dict[str, Any]], payload) if isinstance(payload, list) else []
+
+    @retry(wait=wait_exponential(multiplier=0.25, min=0.25, max=5), stop=stop_after_attempt(3))
     async def order_book(self, token_id: str) -> OrderBook:
         response = await self.http.get(
             f"{self.settings.clob_host}/book", params={"token_id": token_id}
@@ -163,33 +202,66 @@ class PolymarketREST:
         )
 
     async def discover_btc_5m_markets(self, query: str) -> list[BtcIntervalMarket]:
-        payloads = await self.gamma_markets(
-            {
-                "active": "true",
-                "closed": "false",
-                "limit": 100,
-                "order": "endDate",
-                "ascending": "true",
-            }
-        )
+        # BTC 5m market slugs follow the pattern: btc-updown-5m-{unix_end_timestamp}
+        now_ts = int(time.time())
+        current_boundary = math.floor(now_ts / 300) * 300
+        # Check from -1 boundary to +10 boundaries to be safe
+        slugs = [f"btc-updown-5m-{current_boundary + i * 300}" for i in range(-1, 11)]
+
+        async def validate_market(
+            slug: str, event: dict[str, Any], mkt: dict[str, Any]
+        ) -> BtcIntervalMarket | None:
+            if not mkt.get("enableOrderBook"):
+                return None
+            merged = {**event, **mkt}
+            parsed = parse_btc_interval_market(merged)
+            if not parsed:
+                return None
+
+            try:
+                # Validate against CLOB
+                res = await self.http.get(
+                    f"{self.settings.clob_host}/book",
+                    params={"token_id": parsed.up_token_id},
+                )
+                if res.status_code == 200:
+                    logger.info(f"Discovery: accepted market {parsed.slug} (Verified on CLOB)")
+                    return parsed
+                else:
+                    logger.info(
+                        "Discovery: slug %s tokens 404 on CLOB (%s), skipping",
+                        slug,
+                        parsed.up_token_id,
+                    )
+                    return None
+            except Exception as e:
+                logger.error(f"Discovery: error verifying {slug} on CLOB: {e}")
+                return None
+
+        # Fetch all slugs concurrently
+        tasks = [self.gamma_events_by_slug(slug) for slug in slugs]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
         markets: list[BtcIntervalMarket] = []
-        for item in payloads:
-            text = " ".join(
-                str(item.get(key, ""))
-                for key in ("question", "slug", "description", "groupItemTitle")
-            ).lower()
-            if "bitcoin" not in text or "5" not in text or "up" not in text or "down" not in text:
+        seen: set[str] = set()
+
+        validation_tasks: list[Any] = []
+        for i, slug in enumerate(slugs):
+            events = results[i]
+            if isinstance(events, BaseException) or not events:
                 continue
-            query_missing = query.lower().replace("-", " ") not in text.replace("-", " ")
-            duration_missing = (
-                "5 minutes" not in text and "5-minute" not in text and "5min" not in text
-            )
-            if query_missing and duration_missing:
-                continue
-            parsed = parse_btc_interval_market(item)
-            if parsed:
-                markets.append(parsed)
+            for event in events:
+                for mkt in event.get("markets", []):
+                    validation_tasks.append(validate_market(slug, event, mkt))
+
+        validated = await asyncio.gather(*validation_tasks)
+        for m in validated:
+            if m and m.condition_id not in seen:
+                seen.add(m.condition_id)
+                markets.append(m)
+
         return markets
+
 
 
 class ClobTradingClient:
@@ -240,6 +312,21 @@ class ClobTradingClient:
     def client(self) -> Any:
         return self._client or self.build()
 
+    def websocket_api_creds(self) -> dict[str, str]:
+        client = self._client
+        if client is None:
+            return {}
+        creds = getattr(client, "creds", None)
+        if creds is None:
+            return {}
+        return {
+            "apiKey": str(getattr(creds, "api_key", "")),
+            "secret": str(getattr(creds, "api_secret", getattr(creds, "secret", ""))),
+            "passphrase": str(
+                getattr(creds, "api_passphrase", getattr(creds, "passphrase", ""))
+            ),
+        }
+
     async def get_balance_allowance(self) -> BalanceSnapshot:
         from py_clob_client.clob_types import AssetType, BalanceAllowanceParams
 
@@ -248,9 +335,20 @@ class ClobTradingClient:
             return self.client.get_balance_allowance(params)
 
         payload = await asyncio.to_thread(call)
+        
+        # Allowance can be a single string or a dict of contract allowances (for proxy wallets)
+        allowance_raw = payload.get("allowance")
+        if allowance_raw is None and "allowances" in payload:
+            # For proxy wallets, take the max allowance across known exchange/proxy contracts
+            allowances = payload.get("allowances", {})
+            if isinstance(allowances, dict) and allowances:
+                allowance_raw = max(allowances.values(), key=lambda x: int(x))
+            else:
+                allowance_raw = "0"
+
         return BalanceSnapshot(
-            collateral=decimalize(payload.get("balance", "0")),
-            allowance=decimalize(payload.get("allowance", "0")),
+            collateral=decimalize_usdc_amount(payload.get("balance", "0")),
+            allowance=decimalize_usdc_amount(allowance_raw or "0"),
             verified=True,
         )
 
@@ -258,7 +356,7 @@ class ClobTradingClient:
         return await asyncio.to_thread(self.client.get_orders)
 
     async def create_and_post_limit_order(self, quote: Any) -> dict[str, Any]:
-        from py_clob_client.clob_types import OrderArgs, OrderType
+        from py_clob_client.clob_types import CreateOrderOptions, OrderArgs, OrderType
 
         def call() -> Any:
             order_args = OrderArgs(
@@ -269,9 +367,9 @@ class ClobTradingClient:
             )
             signed = self.client.create_order(
                 order_args,
-                {"tick_size": str(quote.tick_size), "neg_risk": quote.neg_risk},
+                CreateOrderOptions(tick_size=str(quote.tick_size), neg_risk=quote.neg_risk),
             )
-            order_type = OrderType[quote.order_type.value]
+            order_type = getattr(OrderType, quote.order_type.value, quote.order_type.value)
             try:
                 return self.client.post_order(signed, order_type, quote.post_only)
             except TypeError:
